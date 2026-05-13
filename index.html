@@ -617,6 +617,10 @@ async function createSession(){
   });
 
   if(error){ alert("Could not create session: " + error.message); return; }
+  await db.from("mystery_votes").delete().eq("session_code", code);
+  await db.from("mystery_responses").delete().eq("session_code", code);
+  app.responses = [];
+  app.votes = [];
   startPolling();
   await loadSession();
   showScreen("host");
@@ -1184,14 +1188,14 @@ renderWinners = function(){
     if(!box) return;
     const rows = app.responses || [];
     if(!rows.length){
-      box.innerHTML = '<div class="waiting">No student responses yet. Click Refresh or wait for submissions.</div>';
+      setStableHTML(box, '<div class="waiting">No student responses yet. Click Refresh or wait for submissions.</div>');
       return;
     }
-    box.innerHTML = rows.map(r => {
+    const html = rows.map(r => {
       const category = r.category || "Featured";
       return `<div class="response ${r.approved ? "approved-response" : ""}">
         <strong>${escapeHTML(r.name || "Student")}</strong>
-        <div class="small">Ideas: ${escapeHTML([r.idea1,r.idea2,r.idea3].filter(Boolean).join(" · "))}</div>
+        <div class="small">Ideas: ${escapeHTML((r.ideas || []).filter(Boolean).join(" · "))}</div>
         <p style="font-size:1.2rem;font-weight:900;">${escapeHTML(r.caption || "")}</p>
         <div class="pick-row">
           <label><span class="small">Reveal label</span>
@@ -1203,6 +1207,7 @@ renderWinners = function(){
         </div>
       </div>`;
     }).join("");
+    setStableHTML(box, html);
   };
 
   window.renderRevealCounter = function(){
