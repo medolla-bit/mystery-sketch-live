@@ -1068,6 +1068,11 @@ renderWinners = function(){
     const idx = Math.min(getRevealIndex(), list.length - 1);
     return { response:list[idx], index:idx, total:list.length };
   }
+  function setStableHTML(el, html, className){
+    if(!el) return;
+    if(className !== undefined && el.className !== className) el.className = className;
+    if(el.innerHTML !== html) el.innerHTML = html;
+  }
   const originalShowScreen = window.showScreen;
   window.showScreen = function(id){
     if(originalShowScreen) originalShowScreen(id);
@@ -1213,7 +1218,9 @@ renderWinners = function(){
       </div>
       <p class="small">Use Reveal Next to show one response at a time on the display.</p>
     </div>`;
-    if(existing) existing.outerHTML = html;
+    if(existing){
+      if(existing.outerHTML !== html) existing.outerHTML = html;
+    }
     else hostResponses.insertAdjacentHTML("beforebegin", html);
   };
 
@@ -1222,34 +1229,33 @@ renderWinners = function(){
     const box = document.getElementById("displayResponses");
     if(!box) return;
     if(!app.reveal){
-      box.className = "waiting";
-      box.innerHTML = "Responses are hidden. Waiting for the teacher reveal.";
+      setStableHTML(box, "Responses are hidden. Waiting for the teacher reveal.", "waiting");
       return;
     }
     const item = currentApproved();
     if(!item){
-      box.className = "waiting";
-      box.innerHTML = "No approved responses yet.";
+      setStableHTML(box, "No approved responses yet.", "waiting");
       return;
     }
     const r = item.response;
-    box.className = "";
     const label = r.category || (item.index === 0 ? "Featured" : "Mystery Reveal");
-    box.innerHTML = `<div class="featured-display-card">
+    const html = `<div class="featured-display-card">
       <div class="featured-label">${escapeHTML(label)}</div>
       <div class="featured-caption">“${escapeHTML(r.caption || "")}”</div>
       ${app.show_names ? `<div class="featured-name">by ${escapeHTML(r.name || "Student")}</div>` : ""}
       <div class="reveal-note">${item.index + 1} of ${item.total}</div>
     </div>`;
+    setStableHTML(box, html, "");
   };
 
   const originalRenderStudentVotes = window.renderStudentVotes;
   window.renderStudentVotes = function(){
     const box = document.getElementById("studentVoteBox");
     if(!box) return;
-    box.innerHTML = app.reveal
+    const html = app.reveal
       ? '<div class="notice">The teacher is revealing selected responses on the display. Watch for surprises.</div>'
       : '<div class="notice">Your response is submitted. The teacher will choose a few to reveal.</div>';
+    setStableHTML(box, html);
   };
 
   const originalRenderWinners = window.renderWinners;
