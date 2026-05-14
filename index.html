@@ -528,19 +528,17 @@ textarea::placeholder {
 <div class="image-box"><img id="hostImage"></div>
 <div class="row" style="margin-top:14px;">
 <button class="btn primary" onclick="randomImage()">Random Sketch</button>
-<button class="btn white" onclick="setReveal(false)">Hide Display</button>
-<button class="btn pink" onclick="setReveal(true)">Start Reveal</button>
-<button class="btn yellow" onclick="revealPrevious()">← Previous</button>
-<button class="btn yellow" onclick="revealNext()">Reveal Next →</button>
-<button class="btn white" onclick="toggleNames()">Show Names: <span id="namesState">Off</span></button>
+<button class="btn white" onclick="clearFeatured()">Hide Featured</button>
+<button class="btn yellow" onclick="revealNext()">Next Featured →</button>
 <button class="btn white" onclick="clearResponses()">Clear Responses</button>
+<span id="namesState" style="display:none;">Off</span>
 </div>
 <div class="label" style="margin-top:18px;">Sketch Deck</div>
 <div class="deck" id="deck"></div>
 </div>
 <div class="card dark">
 <div class="label">Teacher Picks</div>
-<p class="small">Approve strong, surprising, funny, or discussion-worthy responses. The display reveals one approved response at a time.</p>
+<p class="small">Click Feature on one strong, surprising, funny, or discussion-worthy response. The display shows one featured answer at a time.</p>
 <div id="hostResponses"></div>
 <div id="hostWinner"></div>
 </div>
@@ -557,7 +555,7 @@ textarea::placeholder {
 <div class="notice" style="text-align:center;">Session: <span class="code-badge" id="displayCodeBadge">----</span></div>
 <div class="image-box"><img id="displayImage"></div>
 <h2>What do you see?</h2>
-<div id="displayResponses" class="waiting">Captions are hidden until the teacher reveals them.</div>
+<div id="displayResponses" class="waiting">No featured response yet.</div>
 <div id="displayWinner"></div>
 </div>
 </section>
@@ -655,7 +653,7 @@ async function sessionExists(code){
 
 function startPolling(){
   if(poller) clearInterval(poller);
-  poller = setInterval(loadSession, 1400);
+  poller = setInterval(loadSession, 2500);
 }
 
 async function loadSession(){
@@ -672,7 +670,7 @@ async function loadSession(){
   const { data: rows, error: rErr } = await db.from("mystery_responses").select("*").eq("session_code", app.code).order("created_at", { ascending:true });
   if(rErr){ console.warn(rErr); return; }
   app.responses = (rows || []).map(r => ({
-    id:r.id, name:r.student_name||"Anonymous", ideas:[r.idea_1,r.idea_2,r.idea_3].filter(Boolean), caption:r.caption||"", approved:r.approved!==false
+    id:r.id, name:r.student_name||"Anonymous", ideas:[r.idea_1,r.idea_2,r.idea_3].filter(Boolean), caption:r.caption||"", approved:r.approved === true
   }));
 
   const { data: voteRows, error: vErr } = await db.from("mystery_votes").select("*").eq("session_code", app.code);
@@ -693,7 +691,7 @@ async function submitResponse(){
   if(!caption) return alert("Add your final clever caption.");
 
   const { data, error } = await db.from("mystery_responses").insert({
-    session_code:app.code, student_name:name, idea_1:idea1, idea_2:idea2, idea_3:idea3||null, caption:caption, approved:true, votes:0
+    session_code:app.code, student_name:name, idea_1:idea1, idea_2:idea2, idea_3:idea3||null, caption:caption, approved:false, votes:0
   }).select("id").single();
 
   if(error){ alert("Could not submit: " + error.message); return; }
@@ -804,7 +802,8 @@ function render(){
   document.getElementById("displayImage").src = img;
   document.getElementById("hostCodeBadge").textContent = app.code || "----";
   document.getElementById("displayCodeBadge").textContent = app.code || "----";
-  document.getElementById("namesState").textContent = app.show_names ? "On" : "Off";
+  const namesState = document.getElementById("namesState");
+  if(namesState) namesState.textContent = app.show_names ? "On" : "Off";
   renderQR();
   renderDeck();
   renderHostResponses();
@@ -908,16 +907,6 @@ let lastWinnerSeen = "";
 const oldRenderDisplayResponsesSketchbook = renderDisplayResponses;
 renderDisplayResponses = function(){
   oldRenderDisplayResponsesSketchbook();
-  const cards = document.querySelectorAll('#displayResponses .response');
-  cards.forEach((card, i) => {
-    card.style.opacity = '0';
-    card.style.transform = 'translateY(16px) scale(.97)';
-    card.style.transition = 'all .32s ease';
-    setTimeout(() => {
-      card.style.opacity = '1';
-      card.style.transform = 'translateY(0) scale(1)';
-    }, i * 95);
-  });
 };
 
 function tinyConfetti(){
@@ -994,7 +983,7 @@ renderWinners = function(){
   max-width:850px;
   margin:18px auto;
   text-align:center;
-  animation:popReveal .28s ease both;
+  animation:none;
 }
 .featured-label{
   display:inline-flex;
@@ -1064,7 +1053,7 @@ renderWinners = function(){
     localStorage.setItem(REVEAL_INDEX_KEY + "_" + (app.code || ""), String(Math.max(0,n)));
   }
   function approvedResponses(){
-    return (app.responses || []).filter(r => r.approved !== false);
+    return (app.responses || []).filter(r => r.approved === true);
   }
   function currentApproved(){
     const list = approvedResponses();
@@ -1158,28 +1147,38 @@ renderWinners = function(){
   };
 
   window.revealNext = async function(){
-    const list = approvedResponses();
-    if(!list.length){ alert("Approve at least one response first."); return; }
-    app.reveal = true;
-    setRevealIndex(Math.min(getRevealIndex() + 1, list.length - 1));
-    if(typeof setReveal === "function") await setReveal(true);
-    render();
+    const rows = app.responses || [];
+    if(!rows.length){ alert("No student responses yet."); return; }
+    const currentIndex = rows.findIndex(r => r.approved === true);
+    const next = rows[(currentIndex + 1 + rows.length) % rows.length];
+    if(next) await featureResponse(next.id);
   };
 
   window.revealPrevious = async function(){
-    const list = approvedResponses();
-    if(!list.length){ alert("Approve at least one response first."); return; }
-    app.reveal = true;
-    setRevealIndex(Math.max(getRevealIndex() - 1, 0));
-    if(typeof setReveal === "function") await setReveal(true);
-    render();
+    const rows = app.responses || [];
+    if(!rows.length){ alert("No student responses yet."); return; }
+    const currentIndex = rows.findIndex(r => r.approved === true);
+    const previousIndex = currentIndex <= 0 ? rows.length - 1 : currentIndex - 1;
+    const previous = rows[previousIndex];
+    if(previous) await featureResponse(previous.id);
   };
 
-  window.setResponseCategory = async function(id, category){
-    const target = (app.responses || []).find(r => r.id === id);
-    if(target) target.category = category;
-    // Store locally for display. If DB table has no category column, this still works during the live browser session.
-    render();
+  window.featureResponse = async function(id){
+    if(!app.code) return alert("Create a session first.");
+    await db.from("mystery_responses").update({ approved:false }).eq("session_code", app.code);
+    const { error } = await db.from("mystery_responses").update({ approved:true }).eq("id", id);
+    if(error) return alert("Could not feature response: " + error.message);
+    await db.from("mystery_sessions").update({ reveal:true, voting_open:false, show_names:false }).eq("code", app.code);
+    setRevealIndex(0);
+    await loadSession();
+  };
+
+  window.clearFeatured = async function(){
+    if(!app.code) return alert("Create a session first.");
+    await db.from("mystery_responses").update({ approved:false }).eq("session_code", app.code);
+    await db.from("mystery_sessions").update({ reveal:false, voting_open:false, show_names:false }).eq("code", app.code);
+    setRevealIndex(0);
+    await loadSession();
   };
 
   const originalRenderHostResponses = window.renderHostResponses;
@@ -1192,18 +1191,12 @@ renderWinners = function(){
       return;
     }
     const html = rows.map(r => {
-      const category = r.category || "Featured";
       return `<div class="response ${r.approved ? "approved-response" : ""}">
         <strong>${escapeHTML(r.name || "Student")}</strong>
         <div class="small">Ideas: ${escapeHTML((r.ideas || []).filter(Boolean).join(" · "))}</div>
-        <p style="font-size:1.2rem;font-weight:900;">${escapeHTML(r.caption || "")}</p>
+        <div contenteditable="true" onblur="editCaption('${r.id}', this.innerText)" style="margin-top:8px;font-size:1.2rem;font-weight:900;">${escapeHTML(r.caption || "")}</div>
         <div class="pick-row">
-          <label><span class="small">Reveal label</span>
-            <select class="category-select" onchange="setResponseCategory('${r.id}', this.value)">
-              ${["Featured","Funniest","Deepest","Most Unexpected","Most Convincing","Wild Card"].map(x=>`<option ${x===category?"selected":""}>${x}</option>`).join("")}
-            </select>
-          </label>
-          <button class="btn ${r.approved ? "primary" : "white"}" onclick="toggleApprove('${r.id}', ${r.approved})">${r.approved ? "Approved" : "Approve"}</button>
+          <button class="btn ${r.approved ? "primary" : "white"}" onclick="featureResponse('${r.id}')">${r.approved ? "Featured" : "Feature"}</button>
         </div>
       </div>`;
     }).join("");
@@ -1218,10 +1211,10 @@ renderWinners = function(){
     const current = currentApproved();
     const html = `<div id="revealCounterBox" class="reveal-host-tools">
       <div class="row">
-        <span class="reveal-count">${list.length ? (current.index + 1) + " / " + list.length : "0 / 0"}</span>
-        <strong>Approved responses ready for reveal</strong>
+        <span class="reveal-count">${list.length ? "1" : "0"}</span>
+        <strong>${list.length ? "Featured response is live" : "No featured response yet"}</strong>
       </div>
-      <p class="small">Use Reveal Next to show one response at a time on the display.</p>
+      <p class="small">Click Feature on a student response to put it on the display. Use Next Featured to move through submissions.</p>
     </div>`;
     if(existing){
       if(existing.outerHTML !== html) existing.outerHTML = html;
@@ -1234,21 +1227,19 @@ renderWinners = function(){
     const box = document.getElementById("displayResponses");
     if(!box) return;
     if(!app.reveal){
-      setStableHTML(box, "Responses are hidden. Waiting for the teacher reveal.", "waiting");
+      setStableHTML(box, "No featured response yet.", "waiting");
       return;
     }
     const item = currentApproved();
     if(!item){
-      setStableHTML(box, "No approved responses yet.", "waiting");
+      setStableHTML(box, "No featured response yet.", "waiting");
       return;
     }
     const r = item.response;
-    const label = r.category || (item.index === 0 ? "Featured" : "Mystery Reveal");
     const html = `<div class="featured-display-card">
-      <div class="featured-label">${escapeHTML(label)}</div>
+      <div class="featured-label">Featured response</div>
       <div class="featured-caption">“${escapeHTML(r.caption || "")}”</div>
-      ${app.show_names ? `<div class="featured-name">by ${escapeHTML(r.name || "Student")}</div>` : ""}
-      <div class="reveal-note">${item.index + 1} of ${item.total}</div>
+      <div class="reveal-note">Look at the sketch again. What makes this answer work?</div>
     </div>`;
     setStableHTML(box, html, "");
   };
@@ -1258,8 +1249,8 @@ renderWinners = function(){
     const box = document.getElementById("studentVoteBox");
     if(!box) return;
     const html = app.reveal
-      ? '<div class="notice">The teacher is revealing selected responses on the display. Watch for surprises.</div>'
-      : '<div class="notice">Your response is submitted. The teacher will choose a few to reveal.</div>';
+      ? '<div class="notice">A featured response is showing on the display.</div>'
+      : '<div class="notice">Your response is submitted. The teacher may feature one answer on the display.</div>';
     setStableHTML(box, html);
   };
 
